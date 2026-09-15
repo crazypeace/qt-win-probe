@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
     QSvgRenderer svg;
 
     auto future = QtConcurrent::run([] { return 42; });
-    if (future.get() != 42) {
+    if (future.result() != 42) {
         return 1;
     }
     return 0;
