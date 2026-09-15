@@ -34,9 +34,11 @@ jobs:
       - name: Prepare TBuild layout (same as tdesktop)
         shell: cmd
         run: |
-          mkdir %userprofile%\TBuild\Libraries
-          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
-          dir %userprofile%
+          mkdir "%USERPROFILE%\TBuild\Libraries"
+          mklink /d "%GITHUB_WORKSPACE%\TBuild" "%USERPROFILE%\TBuild"
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LIBS_DIR=%USERPROFILE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+          dir %USERPROFILE%
 
       - name: MSVC dev command prompt
         uses: ilammy/msvc-dev-cmd@v1
@@ -56,19 +58,22 @@ jobs:
       - name: Clone Qt source (v6.11.2 + submodules)
         shell: cmd
         run: |
-          cd %userprofile%\TBuild
+          cd /d "%USERPROFILE%\TBuild"
           git clone -b v%QT_VER% https://github.com/qt/qt5.git qt_%QT_VER%
-          cd qt_%QT_VER%
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
           git submodule update --init --recursive --progress qtbase qtimageformats qtshadertools qtsvg
-          dir
+          dir configure.bat
+          if not exist configure.bat (
+            echo NO_TOPLEVEL_CONFIGURE
+            exit /b 1
+          )
 
       - name: Configure Qt (static, debug-and-release)
         shell: cmd
         run: |
-          cd %userprofile%\TBuild\qt_%QT_VER%
-          if not exist "%TBuild%\ThirdParty" mkdir "%TBuild%\ThirdParty"
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
           call configure.bat ^
-            -prefix "%userprofile%\TBuild\Libraries\win64\Qt-%QT_VER%" ^
+            -prefix "%LIBS_DIR%\Qt-%QT_VER%" ^
             -debug-and-release ^
             -force-debug-info ^
             -opensource ^
@@ -83,45 +88,45 @@ jobs:
       - name: Build Qt Debug
         shell: cmd
         run: |
-          cd %userprofile%\TBuild\qt_%QT_VER%
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
           cmake --build . --config Debug --parallel
 
       - name: Install Qt Debug (attempt 1, tolerant)
         continue-on-error: true
         shell: cmd
         run: |
-          cd %userprofile%\TBuild\qt_%QT_VER%
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
           cmake --install . --config Debug
 
       - name: Install Qt Debug (attempt 2, retry)
         continue-on-error: true
         shell: cmd
         run: |
-          cd %userprofile%\TBuild\qt_%QT_VER%
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
           cmake --install . --config Debug
 
       - name: Check Debug install result
         shell: cmd
         run: |
-          if exist "%userprofile%\TBuild\Libraries\win64\Qt-%QT_VER%\lib\cmake\Qt6Gui" (
+          if exist "%LIBS_DIR%\Qt-%QT_VER%\lib\cmake\Qt6Gui" (
             echo DEBUG_INSTALL_OK
           ) else (
             echo DEBUG_INSTALL_MISSING
           )
-          dir "%userprofile%\TBuild\Libraries\win64\Qt-%QT_VER%\lib\cmake" 2>nul | findstr /C:"Qt6"
+          dir "%LIBS_DIR%\Qt-%QT_VER%\lib\cmake" 2>nul | findstr /C:"Qt6"
 
       - name: Build Qt Release
         continue-on-error: true
         shell: cmd
         run: |
-          cd %userprofile%\TBuild\qt_%QT_VER%
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
           cmake --build . --config Release --parallel
 
       - name: Install Qt Release
         continue-on-error: true
         shell: cmd
         run: |
-          cd %userprofile%\TBuild\qt_%QT_VER%
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
           cmake --install . --config Release
 
       - name: Summary
