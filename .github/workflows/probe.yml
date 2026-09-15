@@ -80,10 +80,10 @@ jobs:
             -confirm-license ^
             -static ^
             -static-runtime ^
-            -no-feature-netlistmgr ^
-            -nomake examples ^
-            -nomake tests ^
-            -platform win32-msvc
+            -feature-c++20 ^
+            -trace no ^
+            -platform win32-msvc ^
+            -D ZLIB_WINAPI
 
       - name: Build Qt Debug
         shell: cmd
