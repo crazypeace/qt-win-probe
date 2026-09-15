@@ -1,0 +1,130 @@
+name: Probe C — link tiny app vs PATCHED static Qt 6.11.2
+
+on:
+  workflow_dispatch:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  build-qt:
+    name: Build patched Qt + install cache
+    runs-on: windows-latest
+    env:
+      QT_VER: "6.11.2"
+    defaults:
+      run:
+        shell: cmd
+    steps:
+      - name: Prepare TBuild layout
+        shell: cmd
+        run: |
+          mkdir "%USERPROFILE%\TBuild\Libraries"
+          echo LIBS_DIR=%USERPROFILE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: MSVC dev command prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Qt install cache
+        id: qtcache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.LIBS_DIR }}\Qt-${{ env.QT_VER }}
+          key: qtinstall-patched-${{ env.QT_VER }}-${{ runner.os }}
+
+      - name: Build patched Qt if cache miss
+        if: steps.qtcache.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          cd /d "%USERPROFILE%\TBuild"
+          git clone -b v%QT_VER% https://github.com/qt/qt5.git qt_%QT_VER%
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
+          git submodule update --init --recursive --progress qtbase qtimageformats qtshadertools qtsvg
+          cd /d "%USERPROFILE%\TBuild"
+          git clone --depth 1 https://github.com/desktop-app/patches.git patches
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
+          for %%i in ("%USERPROFILE%\TBuild\patches\qtbase_%QT_VER%\*.patch") do (
+            git -C qtbase apply --ignore-whitespace "%%i"
+            if errorlevel 1 ( echo PATCH_FAILED %%~nxi & exit /b 1 )
+          )
+          call configure.bat ^
+            -prefix "%LIBS_DIR%\Qt-%QT_VER%" ^
+            -debug-and-release ^
+            -force-debug-info ^
+            -opensource ^
+            -confirm-license ^
+            -static ^
+            -static-runtime ^
+            -feature-c++20 ^
+            -trace no ^
+            -platform win32-msvc ^
+            -D ZLIB_WINAPI
+          cmake --build . --config Debug --parallel
+          cmake --install . --config Debug
+          cmake --build . --config Release --parallel
+          cmake --install . --config Release
+          if not exist "%LIBS_DIR%\Qt-%QT_VER%\lib\cmake\Qt6Gui" exit /b 1
+          echo QT_PATCHED_BUILT_OK
+          dir "%GITHUB_WORKSPACE%"
+
+      - name: Upload Qt install as artifact (fallback for link job)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$env:LIBS_DIR\Qt-$env:QT_VER")) { Write-Host "QT_MISSING"; exit 1 }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory("$env:LIBS_DIR\Qt-$env:QT_VER", "$env:GITHUB_WORKSPACE\qt-patched.zip", 'Fastest', $false)
+          Get-Item "$env:GITHUB_WORKSPACE\qt-patched.zip" | Select-Object Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qt-patched-install
+          path: qt-patched.zip
+
+  link-test:
+    name: Link tiny app
+    needs: build-qt
+    runs-on: windows-latest
+    env:
+      QT_VER: "6.11.2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Qt artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: qt-patched-install
+          path: qt
+
+      - name: Unpack Qt
+        shell: pwsh
+        run: |
+          Expand-Archive qt\qt-patched.zip -DestinationPath "$env:USERPROFILE\Qt6"
+          Test-Path "$env:USERPROFILE\Qt6\lib\cmake\Qt6Gui"
+
+      - name: MSVC dev command prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure test app (RelWithDebInfo)
+        shell: cmd
+        run: |
+          cd /d "%GITHUB_WORKSPACE%\testapp"
+          cmake -B build -G "Ninja Multi-Config" -DCMAKE_PREFIX_PATH="%USERPROFILE%\Qt6"
+
+      - name: Build test app RelWithDebInfo
+        shell: cmd
+        run: |
+          cd /d "%GITHUB_WORKSPACE%\testapp"
+          cmake --build build --config RelWithDebInfo
+          if exist build\RelWithDebInfo\qtlinktest.exe (echo LINK_TEST_RWDI_OK) else (echo LINK_TEST_RWDI_FAIL & exit /b 1)
+
+      - name: Build test app Debug
+        shell: cmd
+        run: |
+          cd /d "%GITHUB_WORKSPACE%\testapp"
+          cmake --build build --config Debug
+          if exist build\Debug\qtlinktest.exe (echo LINK_TEST_DEBUG_OK) else (echo LINK_TEST_DEBUG_FAIL & exit /b 1)
