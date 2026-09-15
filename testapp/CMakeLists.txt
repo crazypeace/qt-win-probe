@@ -12,6 +12,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Svg Concurrent)
 # active config — point it at the installed exe (same fix tdesktop needs).
 if(TARGET Qt6::windeployqt)
   get_filename_component(_qt_root "${Qt6_DIR}/../../.." ABSOLUTE)
+  set_property(TARGET Qt6::windeployqt PROPERTY IMPORTED_LOCATION "${_qt_root}/bin/windeployqt.exe")
   set_property(TARGET Qt6::windeployqt PROPERTY IMPORTED_LOCATION_RELWITHDEBINFO "${_qt_root}/bin/windeployqt.exe")
   set_property(TARGET Qt6::windeployqt PROPERTY IMPORTED_LOCATION_DEBUG "${_qt_root}/bin/windeployqt.exe")
 endif()

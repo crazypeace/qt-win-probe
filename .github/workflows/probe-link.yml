@@ -3,6 +3,9 @@ name: Probe C — link tiny app vs PATCHED static Qt 6.11.2
 on:
   workflow_dispatch:
   push:
+    paths:
+      - '.github/workflows/probe-link.yml'
+      - 'testapp/**'
 
 permissions:
   contents: read
