@@ -1,0 +1,104 @@
+name: Qt 6.11.2 + desktop-app patches probe (windows-latest)
+
+on:
+  workflow_dispatch:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  probe-patches:
+    name: Qt 6.11.2 with desktop-app patches
+    runs-on: windows-latest
+    env:
+      QT_VER: "6.11.2"
+    defaults:
+      run:
+        shell: cmd
+    steps:
+      - name: Runner / OS info
+        shell: pwsh
+        run: |
+          Write-Host "ImageOS=$env:ImageOS  ImageVersion=$env:ImageVersion"
+          Get-PSDrive C | Select-Object Used,Free
+
+      - name: Prepare TBuild layout
+        shell: cmd
+        run: |
+          mkdir "%USERPROFILE%\TBuild\Libraries"
+          echo LIBS_DIR=%USERPROFILE%\TBuild\Libraries\win64>>%GITHUB_ENV%
+
+      - name: MSVC dev command prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Clone Qt source and desktop-app patches
+        shell: cmd
+        run: |
+          cd /d "%USERPROFILE%\TBuild"
+          git clone -b v%QT_VER% https://github.com/qt/qt5.git qt_%QT_VER%
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
+          git submodule update --init --recursive --progress qtbase qtimageformats qtshadertools qtsvg
+          cd /d "%USERPROFILE%\TBuild"
+          git clone --depth 1 https://github.com/desktop-app/patches.git patches
+
+      - name: Apply desktop-app qtbase patches
+        shell: cmd
+        run: |
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
+          for %%i in ("%USERPROFILE%\TBuild\patches\qtbase_%QT_VER%\*.patch") do (
+            echo --- applying %%~nxi
+            git -C qtbase apply --ignore-whitespace "%%i"
+            if errorlevel 1 ( echo PATCH_FAILED %%~nxi & exit /b 1 )
+          )
+          echo PATCHES_APPLIED_OK
+
+      - name: Configure Qt (patched static debug-and-release)
+        shell: cmd
+        run: |
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
+          call configure.bat ^
+            -prefix "%LIBS_DIR%\Qt-%QT_VER%" ^
+            -debug-and-release ^
+            -force-debug-info ^
+            -opensource ^
+            -confirm-license ^
+            -static ^
+            -static-runtime ^
+            -feature-c++20 ^
+            -trace no ^
+            -platform win32-msvc ^
+            -D ZLIB_WINAPI
+
+      - name: Build Qt Debug
+        shell: cmd
+        run: |
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
+          cmake --build . --config Debug --parallel
+
+      - name: Install Qt Debug
+        shell: cmd
+        run: |
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
+          cmake --install . --config Debug
+
+      - name: Build Qt Release
+        continue-on-error: true
+        shell: cmd
+        run: |
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
+          cmake --build . --config Release --parallel
+
+      - name: Install Qt Release
+        continue-on-error: true
+        shell: cmd
+        run: |
+          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
+          cmake --install . --config Release
+
+      - name: Result
+        shell: cmd
+        run: |
+          if exist "%LIBS_DIR%\Qt-%QT_VER%\lib\cmake\Qt6Gui" (echo PATCHED_INSTALL_OK) else (echo PATCHED_INSTALL_MISSING)

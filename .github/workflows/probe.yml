@@ -28,7 +28,6 @@ jobs:
           try { Write-Host ("Defender DisableRealtimeMonitoring: " + (Get-MpPreference).DisableRealtimeMonitoring) } catch { Write-Host "Defender info unavailable" }
           $lp = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled
           Write-Host "LongPathsEnabled: $lp"
-          Write-Host "Free disk (GB):"
           Get-PSDrive C | Select-Object Used,Free
 
       - name: Prepare TBuild layout (same as tdesktop)
@@ -38,7 +37,6 @@ jobs:
           mklink /d "%GITHUB_WORKSPACE%\TBuild" "%USERPROFILE%\TBuild"
           echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
           echo LIBS_DIR=%USERPROFILE%\TBuild\Libraries\win64>>%GITHUB_ENV%
-          dir %USERPROFILE%
 
       - name: MSVC dev command prompt
         uses: ilammy/msvc-dev-cmd@v1
@@ -48,27 +46,38 @@ jobs:
       - name: Show toolchain versions
         shell: cmd
         run: |
-          where cl
           cl 2>&1 | findstr /C:"Version"
           cmake --version
-          where ninja & ninja --version
-          where jom & jom -v
-          git --version
+          ninja --version
+
+      # ---- Cache 1: Qt source clone (git tree) ----
+      - name: Restore Qt source cache
+        id: cache-qt-src
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TBUILD }}\qt_${{ env.QT_VER }}
+          key: qt-src-${{ env.QT_VER }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Clone Qt source (v6.11.2 + submodules)
+        if: steps.cache-qt-src.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           cd /d "%USERPROFILE%\TBuild"
           git clone -b v%QT_VER% https://github.com/qt/qt5.git qt_%QT_VER%
           cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
           git submodule update --init --recursive --progress qtbase qtimageformats qtshadertools qtsvg
-          dir configure.bat
-          if not exist configure.bat (
-            echo NO_TOPLEVEL_CONFIGURE
-            exit /b 1
-          )
+          if not exist configure.bat exit /b 1
+
+      # ---- Cache 2: Qt build+install tree (the expensive artifact) ----
+      - name: Restore Qt install cache
+        id: cache-qt-install
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TBUILD }}\Libraries\win64\Qt-${{ env.QT_VER }}
+          key: qt-install-${{ env.QT_VER }}-${{ runner.os }}-${{ runner.arch }}-v1
 
       - name: Configure Qt (static, debug-and-release)
+        if: steps.cache-qt-install.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
@@ -86,20 +95,14 @@ jobs:
             -D ZLIB_WINAPI
 
       - name: Build Qt Debug
+        if: steps.cache-qt-install.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
           cmake --build . --config Debug --parallel
 
-      - name: Install Qt Debug (attempt 1, tolerant)
-        continue-on-error: true
-        shell: cmd
-        run: |
-          cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
-          cmake --install . --config Debug
-
-      - name: Install Qt Debug (attempt 2, retry)
-        continue-on-error: true
+      - name: Install Qt Debug
+        if: steps.cache-qt-install.outputs.cache-hit != 'true'
         shell: cmd
         run: |
           cd /d "%USERPROFILE%\TBuild\qt_%QT_VER%"
@@ -108,14 +111,10 @@ jobs:
       - name: Check Debug install result
         shell: cmd
         run: |
-          if exist "%LIBS_DIR%\Qt-%QT_VER%\lib\cmake\Qt6Gui" (
-            echo DEBUG_INSTALL_OK
-          ) else (
-            echo DEBUG_INSTALL_MISSING
-          )
-          dir "%LIBS_DIR%\Qt-%QT_VER%\lib\cmake" 2>nul | findstr /C:"Qt6"
+          if exist "%LIBS_DIR%\Qt-%QT_VER%\lib\cmake\Qt6Gui" (echo DEBUG_INSTALL_OK) else (echo DEBUG_INSTALL_MISSING)
 
       - name: Build Qt Release
+        if: steps.cache-qt-install.outputs.cache-hit != 'true'
         continue-on-error: true
         shell: cmd
         run: |
@@ -123,6 +122,7 @@ jobs:
           cmake --build . --config Release --parallel
 
       - name: Install Qt Release
+        if: steps.cache-qt-install.outputs.cache-hit != 'true'
         continue-on-error: true
         shell: cmd
         run: |
@@ -134,11 +134,8 @@ jobs:
         run: |
           $root = "$env:USERPROFILE\TBuild\Libraries\win64\Qt-$env:QT_VER"
           Write-Host "Install root: $root"
+          Write-Host "Install cache hit: ${{ steps.cache-qt-install.outputs.cache-hit }}"
           if (Test-Path $root) {
             Write-Host "== lib/cmake =="
             Get-ChildItem "$root\lib\cmake" -ErrorAction SilentlyContinue | Select-Object Name
-            Write-Host "== bin =="
-            Get-ChildItem "$root\bin" -ErrorAction SilentlyContinue | Select-Object Name | Select-Object -First 10
-          } else {
-            Write-Host "NOT INSTALLED"
-          }
+          } else { Write-Host "NOT INSTALLED" }
