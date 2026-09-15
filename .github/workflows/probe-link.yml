@@ -109,22 +109,23 @@ jobs:
         with:
           arch: x64
 
-      - name: Configure test app (RelWithDebInfo)
+      - name: Configure test app (single-config, matches static Qt)
         shell: cmd
         run: |
           cd /d "%GITHUB_WORKSPACE%\testapp"
-          cmake -B build -G "Ninja Multi-Config" -DCMAKE_PREFIX_PATH="%USERPROFILE%\Qt6"
+          cmake -B build-rwdi -G "Ninja" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH="%USERPROFILE%\Qt6" -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl .
 
       - name: Build test app RelWithDebInfo
         shell: cmd
         run: |
           cd /d "%GITHUB_WORKSPACE%\testapp"
-          cmake --build build --config RelWithDebInfo
-          if exist build\RelWithDebInfo\qtlinktest.exe (echo LINK_TEST_RWDI_OK) else (echo LINK_TEST_RWDI_FAIL & exit /b 1)
+          cmake --build build-rwdi
+          if exist build-rwdi\qtlinktest.exe (echo LINK_TEST_RWDI_OK) else (echo LINK_TEST_RWDI_FAIL & exit /b 1)
 
       - name: Build test app Debug
         shell: cmd
         run: |
           cd /d "%GITHUB_WORKSPACE%\testapp"
-          cmake --build build --config Debug
-          if exist build\Debug\qtlinktest.exe (echo LINK_TEST_DEBUG_OK) else (echo LINK_TEST_DEBUG_FAIL & exit /b 1)
+          cmake -B build-dbg -G "Ninja" -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="%USERPROFILE%\Qt6" -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl .
+          cmake --build build-dbg
+          if exist build-dbg\qtlinktest.exe (echo LINK_TEST_DEBUG_OK) else (echo LINK_TEST_DEBUG_FAIL & exit /b 1)
